@@ -39,7 +39,7 @@ def to_label_selector(tags):
     for k, v in tags.items():
         if label_selector != '':
             label_selector += ','
-        label_selector += '{}={}'.format(k, v)
+        label_selector += f'{k}={v}'
     return label_selector
 
 
@@ -143,7 +143,7 @@ class KubernetesNodeProvider(NodeProvider):
                 known_msg = f'Worker internal IPs: {list(self._internal_ip_cache)}'
             else:
                 known_msg = f'Worker external IP: {list(self._external_ip_cache)}'
-            raise ValueError(f'ip {ip_address} not found. ' + known_msg)
+            raise ValueError(f'ip {ip_address} not found. {known_msg}')
 
         return find_node_id()
 
@@ -153,14 +153,12 @@ class KubernetesNodeProvider(NodeProvider):
                 self._set_node_tags(node_ids, tags)
                 return
             except kubernetes.api_exception() as e:
-                if e.status == 409:
-                    logger.info(config.log_prefix +
-                                'Caught a 409 error while setting'
-                                ' node tags. Retrying...')
-                    time.sleep(DELAY_BEFORE_TAG_RETRY)
-                    continue
-                else:
+                if e.status != 409:
                     raise
+                logger.info(
+                    f'{config.log_prefix}Caught a 409 error while setting node tags. Retrying...'
+                )
+                time.sleep(DELAY_BEFORE_TAG_RETRY)
         # One more try
         self._set_node_tags(node_ids, tags)
 
@@ -187,19 +185,21 @@ class KubernetesNodeProvider(NodeProvider):
             head_selector = head_service_selector(self.cluster_name)
             pod_spec['metadata']['labels'].update(head_selector)
 
-        logger.info(config.log_prefix +
-                    'calling create_namespaced_pod (count={}).'.format(count))
+        logger.info(
+            f'{config.log_prefix}calling create_namespaced_pod (count={count}).'
+        )
         new_nodes = []
         for _ in range(count):
             pod = kubernetes.core_api().create_namespaced_pod(
                 self.namespace, pod_spec)
             new_nodes.append(pod)
 
-        new_svcs = []
         if service_spec is not None:
-            logger.info(config.log_prefix + 'calling create_namespaced_service '
-                        '(count={}).'.format(count))
+            logger.info(
+                f'{config.log_prefix}calling create_namespaced_service (count={count}).'
+            )
 
+            new_svcs = []
             for new_node in new_nodes:
 
                 metadata = service_spec.get('metadata', {})
@@ -227,14 +227,15 @@ class KubernetesNodeProvider(NodeProvider):
                 pod = kubernetes.core_api().read_namespaced_pod(
                     node.metadata.name, self.namespace)
                 if pod.status.phase == 'Pending':
-                    # Iterate over each pod to check their status
                     if pod.status.container_statuses is not None:
                         for container_status in pod.status.container_statuses:
                             # Continue if container status is ContainerCreating
                             # This indicates this pod has been scheduled.
-                            if container_status.state.waiting is not None and container_status.state.waiting.reason == 'ContainerCreating':
-                                continue
-                            else:
+                            if (
+                                container_status.state.waiting is None
+                                or container_status.state.waiting.reason
+                                != 'ContainerCreating'
+                            ):
                                 # If the container wasn't in creating state,
                                 # then we know pod wasn't scheduled or had some
                                 # other error, such as image pull error.
@@ -250,7 +251,7 @@ class KubernetesNodeProvider(NodeProvider):
             time.sleep(1)
 
     def terminate_node(self, node_id):
-        logger.info(config.log_prefix + 'calling delete_namespaced_pod')
+        logger.info(f'{config.log_prefix}calling delete_namespaced_pod')
         try:
             kubernetes.core_api().delete_namespaced_pod(
                 node_id,
@@ -316,10 +317,7 @@ class KubernetesNodeProvider(NodeProvider):
             'use_internal_ip': use_internal_ip,
         }
         command_runner = SSHCommandRunner(**common_args)
-        if use_internal_ip:
-            port = 22
-        else:
-            port = self.external_port(node_id)
+        port = 22 if use_internal_ip else self.external_port(node_id)
         command_runner.set_port(port)
         return command_runner
 

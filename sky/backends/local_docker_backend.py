@@ -191,11 +191,11 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
     ) -> None:
         """File mounts in Docker are implemented with volume mounts (-v)."""
         assert not storage_mounts, \
-            'Only local file mounts are supported with LocalDockerBackend.'
+                'Only local file mounts are supported with LocalDockerBackend.'
         docker_mounts = {}
 
         # Add DIND socket mount
-        docker_mounts.update(LocalDockerBackend._dind_mount)
+        docker_mounts |= LocalDockerBackend._dind_mount
 
         # Add other mounts
         if all_file_mounts:
@@ -217,7 +217,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         del detach_setup  # unused
         style = colorama.Style
         assert handle in self.images, \
-            f'No image found for {handle}, have you run Backend.provision()?'
+                f'No image found for {handle}, have you run Backend.provision()?'
         image_tag, metadata = self.images[handle]
         volumes = self.volume_mounts[handle]
         runtime = 'nvidia' if self._use_gpu else None
@@ -226,7 +226,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         cluster_name = handle.get_cluster_name()
         # Encode metadata in docker labels:
         labels = {f'{_DOCKER_LABEL_PREFIX}{k}': v for k, v in metadata.items()}
-        labels.update(_DOCKER_DEFAULT_LABELS)
+        labels |= _DOCKER_DEFAULT_LABELS
         try:
             # Check if a container exists and remove it to create new one
             _ = self.client.containers.get(handle)  # Throws NotFound error
@@ -354,12 +354,11 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         }
         containers = self.client.containers.list(filters=search_filter)
         for c in containers:
-            # Extract container/image metadata
-            metadata = {}
-            for k, v in c.labels.items():
-                if k.startswith(_DOCKER_LABEL_PREFIX):
-                    # Remove 'skymeta_' from key
-                    metadata[k[len(_DOCKER_LABEL_PREFIX):]] = v
+            metadata = {
+                k[len(_DOCKER_LABEL_PREFIX) :]: v
+                for k, v in c.labels.items()
+                if k.startswith(_DOCKER_LABEL_PREFIX)
+            }
             self.images[c.name] = [c.image, metadata]
             self.containers[c.name] = c
 

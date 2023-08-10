@@ -1,4 +1,5 @@
 """Util constants/functions for the backends."""
+
 from datetime import datetime
 import difflib
 import enum
@@ -82,7 +83,8 @@ _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
 # bug with python=3.6.
 # 10.133.0.5: ray.worker.default,
 _LAUNCHING_IP_PATTERN = re.compile(
-    r'({}): ray[._]worker[._]default'.format(IP_ADDR_REGEX))
+    f'({IP_ADDR_REGEX}): ray[._]worker[._]default'
+)
 WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 
 # We check network connection by going through _TEST_IP_LIST. We may need to
@@ -164,8 +166,7 @@ def fill_template(template_name: str, variables: Dict,
     template_path = os.path.join(sky.__root_dir__, 'templates', template_name)
     if not os.path.exists(template_path):
         raise FileNotFoundError(f'Template "{template_name}" does not exist.')
-    with open(template_path) as fin:
-        template = fin.read()
+    template = pathlib.Path(template_path).read_text()
     output_path = os.path.abspath(os.path.expanduser(output_path))
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
@@ -205,11 +206,9 @@ def _optimize_file_mounts(yaml_path: str) -> None:
     local_runtime_files_dir = tempfile.mkdtemp()
     new_file_mounts = {_REMOTE_RUNTIME_FILES_DIR: local_runtime_files_dir}
 
-    # Generate local_src -> unique_name.
-    local_source_to_unique_name = {}
-    for local_src in file_mounts.values():
-        local_source_to_unique_name[local_src] = str(uuid.uuid4())
-
+    local_source_to_unique_name = {
+        local_src: str(uuid.uuid4()) for local_src in file_mounts.values()
+    }
     # (For remote) Build a command that copies runtime files to their right
     # destinations.
     # NOTE: we copy rather than move, because when launching >1 node, head node
@@ -303,12 +302,11 @@ def path_size_megabytes(path: str) -> int:
     match = re.search(r'total size is ([\d,]+)', rsync_output)
     if match is not None:
         try:
-            total_bytes = int(float(match.group(1).replace(',', '')))
+            total_bytes = int(float(match[1].replace(',', '')))
             return total_bytes // (1024**2)
         except ValueError:
             logger.debug('Failed to find "total size" in rsync output. Inspect '
                          f'output of the following command: {rsync_command}')
-            pass  # Maybe different rsync versions have different output.
     return -1
 
 
@@ -402,10 +400,7 @@ class SSHConfigHelper(object):
     def _get_generated_config(cls, autogen_comment: str, host_name: str,
                               ip: str, username: str, ssh_key_path: str,
                               proxy_command: Optional[str], port: int):
-        if proxy_command is not None:
-            proxy = f'ProxyCommand {proxy_command}'
-        else:
-            proxy = ''
+        proxy = f'ProxyCommand {proxy_command}' if proxy_command is not None else ''
         # StrictHostKeyChecking=no skips the host key check for the first
         # time. UserKnownHostsFile=/dev/null and GlobalKnownHostsFile/dev/null
         # prevent the host key from being added to the known_hosts file and
@@ -467,7 +462,7 @@ class SSHConfigHelper(object):
             # If an existing config with `cluster_name` exists, raise a warning.
             for i, line in enumerate(config):
                 if line.strip() == f'Host {cluster_name}':
-                    prev_line = config[i - 1] if i - 1 >= 0 else ''
+                    prev_line = config[i - 1] if i >= 1 else ''
                     if prev_line.strip().startswith(sky_autogen_comment):
                         overwrite = True
                         overwrite_begin_idx = i - 1
@@ -478,7 +473,7 @@ class SSHConfigHelper(object):
                         logger.warning(f'Using {ip} to identify host instead.')
 
                 if line.strip() == f'Host {ip}':
-                    prev_line = config[i - 1] if i - 1 >= 0 else ''
+                    prev_line = config[i - 1] if i >= 1 else ''
                     if prev_line.strip().startswith(sky_autogen_comment):
                         overwrite = True
                         overwrite_begin_idx = i - 1
@@ -540,12 +535,12 @@ class SSHConfigHelper(object):
         overwrite_begin_idxs: List[Optional[int]] = [None
                                                     ] * len(external_worker_ips)
         codegens: List[Optional[str]] = [None] * len(external_worker_ips)
-        worker_names = []
         extra_path_name = cls.ssh_multinode_path.format(cluster_name)
 
-        for idx in range(len(external_worker_ips)):
-            worker_names.append(cluster_name + f'-worker{idx+1}')
-
+        worker_names = [
+            f'{cluster_name}-worker{idx + 1}'
+            for idx in range(len(external_worker_ips))
+        ]
         config_path = os.path.expanduser(cls.ssh_conf_path)
         with open(config_path) as f:
             config = f.readlines()
@@ -849,8 +844,6 @@ def write_cluster_config(
     # for the validation.
     resources_vars = cloud.make_deploy_resources_variables(
         to_provision, region, zones)
-    config_dict = {}
-
     azure_subscription_id = None
     if isinstance(cloud, clouds.Azure):
         azure_subscription_id = cloud.get_project_id(dryrun=dryrun)
@@ -877,25 +870,20 @@ def write_cluster_config(
     if (isinstance(ssh_proxy_command_config, str) or
             ssh_proxy_command_config is None):
         ssh_proxy_command = ssh_proxy_command_config
+    elif keep_launch_fields_in_existing_config:
+        # (1) We're re-provisioning an existing cluster.
+        #
+        # We use None for ssh_proxy_command, which will be restored to the
+        # cluster's original value later by _replace_yaml_dicts().
+        ssh_proxy_command = None
     else:
-        # ssh_proxy_command_config: Dict[str, str], region_name -> command
-        # This type check is done by skypilot_config at config load time.
-
-        # There are two cases:
-        if keep_launch_fields_in_existing_config:
-            # (1) We're re-provisioning an existing cluster.
-            #
-            # We use None for ssh_proxy_command, which will be restored to the
-            # cluster's original value later by _replace_yaml_dicts().
-            ssh_proxy_command = None
-        else:
-            # (2) We're launching a new cluster.
-            #
-            # Resources.get_valid_regions_for_launchable() respects the keys (regions)
-            # in ssh_proxy_command in skypilot_config. So here we add an assert.
-            assert region_name in ssh_proxy_command_config, (
-                region_name, ssh_proxy_command_config)
-            ssh_proxy_command = ssh_proxy_command_config[region_name]
+        # (2) We're launching a new cluster.
+        #
+        # Resources.get_valid_regions_for_launchable() respects the keys (regions)
+        # in ssh_proxy_command in skypilot_config. So here we add an assert.
+        assert region_name in ssh_proxy_command_config, (
+            region_name, ssh_proxy_command_config)
+        ssh_proxy_command = ssh_proxy_command_config[region_name]
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # User-supplied instance tags.
@@ -920,7 +908,7 @@ def write_cluster_config(
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
-    tmp_yaml_path = yaml_path + '.tmp'
+    tmp_yaml_path = f'{yaml_path}.tmp'
     fill_template(
         cluster_config_template,
         dict(
@@ -992,8 +980,7 @@ def write_cluster_config(
                 **auth_config,
             }),
         output_path=tmp_yaml_path)
-    config_dict['cluster_name'] = cluster_name
-    config_dict['ray'] = yaml_path
+    config_dict = {'cluster_name': cluster_name, 'ray': yaml_path}
     if dryrun:
         # If dryrun, return the unfinished tmp yaml path.
         config_dict['ray'] = tmp_yaml_path
@@ -1093,10 +1080,6 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_oci_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
-        # Local cluster case, authentication is already filled by the user
-        # in the local cluster config (in ~/.sky/local/...). There is no need
-        # for Sky to generate authentication.
-        pass
     common_utils.dump_yaml(cluster_config_file, config)
 
 
@@ -1426,8 +1409,7 @@ def get_node_ips(cluster_yaml: str,
     # won't work and we need to query the node IPs with gcloud as
     # implmented in _get_tpu_vm_pod_ips.
     ray_config = common_utils.read_yaml(cluster_yaml)
-    use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
-    if use_tpu_vm:
+    if use_tpu_vm := ray_config['provider'].get('_has_tpus', False):
         assert expected_num_nodes == 1, (
             'TPU VM only supports single node for now.')
         assert handle is not None, 'handle is required for TPU VM.'
@@ -1495,23 +1477,22 @@ def get_node_ips(cluster_yaml: str,
                     break
         if len(worker_ips) != expected_num_nodes - 1:
             n = expected_num_nodes - 1
-            if len(worker_ips) > n:
-                # This could be triggered if e.g., some logging is added in
-                # skypilot_config, a module that has some code executed whenever
-                # `sky` is imported.
-                logger.warning(
-                    f'Expected {n} worker IP(s); found '
-                    f'{len(worker_ips)}: {worker_ips}'
-                    '\nThis could happen if there is extra output from '
-                    '`ray get-worker-ips`, which should be inspected below.'
-                    f'\n== Output ==\n{out}'
-                    f'\n== Output ends ==')
-                logger.warning(f'\nProceeding with the last {n} '
-                               f'detected IP(s): {worker_ips[-n:]}.')
-                worker_ips = worker_ips[-n:]
-            else:
+            if len(worker_ips) <= n:
                 raise exceptions.FetchIPError(
                     exceptions.FetchIPError.Reason.WORKER)
+            # This could be triggered if e.g., some logging is added in
+            # skypilot_config, a module that has some code executed whenever
+            # `sky` is imported.
+            logger.warning(
+                f'Expected {n} worker IP(s); found '
+                f'{len(worker_ips)}: {worker_ips}'
+                '\nThis could happen if there is extra output from '
+                '`ray get-worker-ips`, which should be inspected below.'
+                f'\n== Output ==\n{out}'
+                f'\n== Output ends ==')
+            logger.warning(f'\nProceeding with the last {n} '
+                           f'detected IP(s): {worker_ips[-n:]}.')
+            worker_ips = worker_ips[-n:]
     else:
         worker_ips = []
     return head_ip_list + worker_ips
@@ -1605,8 +1586,7 @@ def get_head_ip(
     head_ip = handle.head_ip
     if head_ip is not None:
         return head_ip
-    head_ip = _query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
-    return head_ip
+    return _query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
 
 
 @timeline.event
@@ -1617,18 +1597,12 @@ def get_head_ssh_port(
 ) -> int:
     """Returns the ip of the head node."""
     del max_attempts  # Unused.
-    # Use port 22 for everything except Kubernetes
-    # TODO(romilb): Add a get port method to the cloud classes.
-    head_ssh_port = 22
     if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-        return head_ssh_port
-    else:
-        if use_cache and handle.head_ssh_port is not None:
-            head_ssh_port = handle.head_ssh_port
-        else:
-            svc_name = f'{handle.get_cluster_name()}-ray-head-ssh'
-            head_ssh_port = clouds.Kubernetes.get_port(svc_name)
-    return head_ssh_port
+        return 22
+    if use_cache and handle.head_ssh_port is not None:
+        return handle.head_ssh_port
+    svc_name = f'{handle.get_cluster_name()}-ray-head-ssh'
+    return clouds.Kubernetes.get_port(svc_name)
 
 
 def check_network_connection():
@@ -1850,12 +1824,11 @@ def check_can_clone_disk_and_override_task(
     assert original_cloud is not None, handle.launched_resources
     if task_resources.cloud is None:
         override_param['cloud'] = original_cloud
-    else:
-        if not original_cloud.is_same_cloud(task_resources.cloud):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Cannot clone disk across cloud from {original_cloud} to '
-                    f'{task_resources.cloud}.')
+    elif not original_cloud.is_same_cloud(task_resources.cloud):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Cannot clone disk across cloud from {original_cloud} to '
+                f'{task_resources.cloud}.')
     original_cloud.check_features_are_supported(
         {clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER})
 
@@ -2205,9 +2178,7 @@ def refresh_cluster_status_handle(
         cluster_name,
         force_refresh_statuses=force_refresh_statuses,
         acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
-    if record is None:
-        return None, None
-    return record['status'], record['handle']
+    return (None, None) if record is None else (record['status'], record['handle'])
 
 
 # =====================================
@@ -2471,7 +2442,7 @@ def get_clusters(
                     f'{bright}{cluster_str}{reset}')
     if remaining_clusters:
         plural = 's' if len(remaining_clusters) > 1 else ''
-        cluster_str = ', '.join(name for name in remaining_clusters)
+        cluster_str = ', '.join(remaining_clusters)
         logger.warning(f'{yellow}Cluster{plural} terminated on '
                        f'the cloud: {reset}{bright}{cluster_str}{reset}')
 
@@ -2523,8 +2494,6 @@ def get_backend_from_handle(
 
 def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
     """Returns the accelerator dict of the task"""
-    # TODO: CPU and other memory resources are not supported yet.
-    accelerator_dict = None
     if task.best_resources is not None:
         resources = task.best_resources
     else:
@@ -2532,9 +2501,7 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
         # sky.optimize(), so best_resources may be None.
         assert len(task.resources) == 1, task.resources
         resources = list(task.resources)[0]
-    if resources is not None:
-        accelerator_dict = resources.accelerators
-    return accelerator_dict
+    return resources.accelerators if resources is not None else None
 
 
 def get_task_resources_str(task: 'task_lib.Task') -> str:

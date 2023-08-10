@@ -25,8 +25,7 @@ def get_port(svc_name: str, namespace: str) -> int:
     return head_service.spec.ports[0].node_port
 
 
-def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
-        Tuple[bool, Optional[str]]:
+def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> Tuple[bool, Optional[str]]:
     """
     Check if the credentials in kubeconfig file are valid
 
@@ -44,8 +43,10 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
     except ImportError:
         # TODO(romilb): Update these error strs to also include link to docs
         #  when docs are ready.
-        return False, f'`kubernetes` package is not installed. ' \
-                      f'Install it with: pip install kubernetes'
+        return (
+            False,
+            '`kubernetes` package is not installed. Install it with: pip install kubernetes',
+        )
     except kubernetes.api_exception() as e:
         # Check if the error is due to invalid credentials
         if e.status == 401:

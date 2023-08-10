@@ -95,12 +95,11 @@ def _get_instance_family(instance_type: str) -> str:
     # TODO(woosuk): Use better regex.
     if '-' in instance_type:
         x = re.match(r'([A-Za-z]+)([0-9]+)(-)([0-9]+)(.*)', instance_type)
-        assert x is not None, x
-        instance_family = x.group(1) + '_' + x.group(5)
+        instance_family = f'{x[1]}_{x[5]}'
     else:
         x = re.match(r'([A-Za-z]+)([0-9]+)(.*)', instance_type)
-        assert x is not None, x
-        instance_family = x.group(1) + x.group(3)
+        instance_family = x[1] + x[3]
+    assert x is not None, x
     return instance_family
 
 

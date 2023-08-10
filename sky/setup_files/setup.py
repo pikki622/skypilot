@@ -41,10 +41,10 @@ def find_version(*filepath):
     # Adapted from:
     #  https://github.com/ray-project/ray/blob/master/python/setup.py
     with open(os.path.join(ROOT_DIR, *filepath)) as fp:
-        version_match = re.search(r'^__version__ = [\'"]([^\'"]*)[\'"]',
-                                  fp.read(), re.M)
-        if version_match:
-            return version_match.group(1)
+        if version_match := re.search(
+            r'^__version__ = [\'"]([^\'"]*)[\'"]', fp.read(), re.M
+        ):
+            return version_match[1]
         raise RuntimeError('Unable to find version string.')
 
 

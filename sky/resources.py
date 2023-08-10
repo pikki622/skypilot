@@ -201,21 +201,12 @@ class Resources:
             if self.accelerator_args is not None:
                 accelerator_args = f', accelerator_args={self.accelerator_args}'
 
-        cpus = ''
-        if self.cpus is not None:
-            cpus = f', cpus={self.cpus}'
-
-        memory = ''
-        if self.memory is not None:
-            memory = f', mem={self.memory}'
-
+        cpus = f', cpus={self.cpus}' if self.cpus is not None else ''
+        memory = f', mem={self.memory}' if self.memory is not None else ''
         if isinstance(self.cloud, clouds.Local):
             return f'{self.cloud}({self.accelerators})'
 
-        use_spot = ''
-        if self.use_spot:
-            use_spot = '[Spot]'
-
+        use_spot = '[Spot]' if self.use_spot else ''
         image_id = ''
         if self.image_id is not None:
             if None in self.image_id:
@@ -223,18 +214,12 @@ class Resources:
             else:
                 image_id = f', image_id={self.image_id!r}'
 
-        disk_tier = ''
-        if self.disk_tier is not None:
-            disk_tier = f', disk_tier={self.disk_tier}'
-
+        disk_tier = '' if self.disk_tier is None else f', disk_tier={self.disk_tier}'
         disk_size = ''
         if self.disk_size != _DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
 
-        ports = ''
-        if self.ports is not None:
-            ports = f', ports={self.ports}'
-
+        ports = f', ports={self.ports}' if self.ports is not None else ''
         if self._instance_type is not None:
             instance_type = f'{self._instance_type}'
         else:
@@ -362,11 +347,7 @@ class Resources:
 
         self._cpus = str(cpus)
         if isinstance(cpus, str):
-            if cpus.endswith('+'):
-                num_cpus_str = cpus[:-1]
-            else:
-                num_cpus_str = cpus
-
+            num_cpus_str = cpus[:-1] if cpus.endswith('+') else cpus
             try:
                 num_cpus = float(num_cpus_str)
             except ValueError:
@@ -392,11 +373,7 @@ class Resources:
 
         self._memory = str(memory)
         if isinstance(memory, str):
-            if memory.endswith('+'):
-                num_memory_gb = memory[:-1]
-            else:
-                num_memory_gb = memory
-
+            num_memory_gb = memory[:-1] if memory.endswith('+') else memory
             try:
                 memory_gb = float(num_memory_gb)
             except ValueError:
@@ -473,10 +450,7 @@ class Resources:
                                 'Cannot specify instance type'
                                 f' (got "{self.instance_type}") for TPU VM.')
                 if 'runtime_version' not in accelerator_args:
-                    if use_tpu_vm:
-                        accelerator_args['runtime_version'] = 'tpu-vm-base'
-                    else:
-                        accelerator_args['runtime_version'] = '2.5.0'
+                    accelerator_args['runtime_version'] = 'tpu-vm-base' if use_tpu_vm else '2.5.0'
                     logger.info(
                         'Missing runtime_version in accelerator_args, using'
                         f' default ({accelerator_args["runtime_version"]})')
@@ -570,13 +544,13 @@ class Resources:
                         f'Invalid instance type {self._instance_type!r} '
                         f'for cloud {self.cloud}.')
         else:
-            # If cloud not specified
-            valid_clouds = []
             enabled_clouds = global_user_state.get_enabled_clouds()
-            for cloud in enabled_clouds:
-                if cloud.instance_type_exists(self._instance_type):
-                    valid_clouds.append(cloud)
-            if len(valid_clouds) == 0:
+            valid_clouds = [
+                cloud
+                for cloud in enabled_clouds
+                if cloud.instance_type_exists(self._instance_type)
+            ]
+            if not valid_clouds:
                 if len(enabled_clouds) == 1:
                     cloud_str = f'for cloud {enabled_clouds[0]}'
                 else:
@@ -652,23 +626,24 @@ class Resources:
                     f'{list(spot.SPOT_STRATEGIES.keys())}')
 
     def _try_validate_local(self) -> None:
-        if isinstance(self._cloud, clouds.Local):
-            if self._use_spot:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Local/On-prem mode does not support spot '
-                                     'instances.')
-            local_instance = clouds.Local.get_default_instance_type()
-            if (self._instance_type is not None and
-                    self._instance_type != local_instance):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Local/On-prem mode does not support instance type:'
-                        f' {self._instance_type}.')
-            if self._image_id is not None:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Local/On-prem mode does not support custom '
-                        'images.')
+        if not isinstance(self._cloud, clouds.Local):
+            return
+        if self._use_spot:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Local/On-prem mode does not support spot '
+                                 'instances.')
+        local_instance = clouds.Local.get_default_instance_type()
+        if (self._instance_type is not None and
+                self._instance_type != local_instance):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Local/On-prem mode does not support instance type:'
+                    f' {self._instance_type}.')
+        if self._image_id is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Local/On-prem mode does not support custom '
+                    'images.')
 
     def _try_validate_image_id(self) -> None:
         if self._image_id is None:
@@ -954,7 +929,7 @@ class Resources:
             _is_image_managed=override.pop('_is_image_managed',
                                            self._is_image_managed),
         )
-        assert len(override) == 0
+        assert not override
         return resources
 
     def valid_on_region_zones(self, region: str, zones: List[str]) -> bool:

@@ -166,9 +166,7 @@ class GCP(clouds.Cloud):
             acc_count = list(accelerators.values())[0]
             acc_regions = service_catalog.get_region_zones_for_accelerators(
                 acc, acc_count, use_spot, clouds='gcp')
-            if instance_type is None:
-                regions = acc_regions
-            elif instance_type == 'TPU-VM':
+            if instance_type is None or instance_type == 'TPU-VM':
                 regions = acc_regions
             else:
                 vm_regions = service_catalog.get_region_zones_for_instance_type(
@@ -183,9 +181,7 @@ class GCP(clouds.Cloud):
                         assert r2.zones is not None, r2
                         zones = []
                         for z1 in r1.zones:
-                            for z2 in r2.zones:
-                                if z1.name == z2.name:
-                                    zones.append(z1)
+                            zones.extend(z1 for z2 in r2.zones if z1.name == z2.name)
                         if zones:
                             regions.append(r1.set_zones(zones))
                         break
@@ -314,7 +310,7 @@ class GCP(clouds.Cloud):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError('Not able to access the image '
                                      f'{image_id!r}') from None
-            if e.resp.status == 404:
+            elif e.resp.status == 404:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(f'Image {image_id!r} not found in '
                                      'GCP.') from None
@@ -379,10 +375,9 @@ class GCP(clouds.Cloud):
                 # https://cloud.google.com/compute/docs/gpus
                 if acc in ('A100-80GB', 'L4'):
                     # A100-80GB and L4 have a different name pattern.
-                    resources_vars['gpu'] = 'nvidia-{}'.format(acc.lower())
+                    resources_vars['gpu'] = f'nvidia-{acc.lower()}'
                 else:
-                    resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
-                        acc.lower())
+                    resources_vars['gpu'] = f'nvidia-tesla-{acc.lower()}'
                 resources_vars['gpu_count'] = acc_count
                 if acc == 'K80':
                     # Though the image is called cu113, it actually has later
@@ -428,15 +423,14 @@ class GCP(clouds.Cloud):
                 disk_tier=resources.disk_tier)
             if host_vm_type is None:
                 return ([], [])
-            else:
-                r = resources.copy(
-                    cloud=GCP(),
-                    instance_type=host_vm_type,
-                    accelerators=None,
-                    cpus=None,
-                    memory=None,
-                )
-                return ([r], [])
+            r = resources.copy(
+                cloud=GCP(),
+                instance_type=host_vm_type,
+                accelerators=None,
+                cpus=None,
+                memory=None,
+            )
+            return ([r], [])
 
         use_tpu_vm = False
         if resources.accelerator_args is not None:
@@ -666,9 +660,9 @@ class GCP(clouds.Cloud):
                                                         body=permissions)
         ret_permissions = request.execute().get('permissions', [])
 
-        diffs = set(constants.VM_MINIMAL_PERMISSIONS).difference(
-            set(ret_permissions))
-        if len(diffs) > 0:
+        if diffs := set(constants.VM_MINIMAL_PERMISSIONS).difference(
+            set(ret_permissions)
+        ):
             identity_str = identity[0] if identity else None
             return False, (
                 'The following permissions are not enabled for the current '
@@ -745,9 +739,7 @@ class GCP(clouds.Cloud):
     @classmethod
     def get_current_user_identity_str(cls) -> Optional[str]:
         user_identity = cls.get_current_user_identity()
-        if user_identity is None:
-            return None
-        return user_identity[0].replace('\n', '')
+        return None if user_identity is None else user_identity[0].replace('\n', '')
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
@@ -866,10 +858,7 @@ class GCP(clouds.Cloud):
                            f'with error: {e}')
             return True
 
-        if quota == 0:
-            return False
-        # Quota found to be greater than zero, try provisioning
-        return True
+        return quota != 0
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
@@ -1008,7 +997,7 @@ class GCP(clouds.Cloud):
 
         image_uri = stdout.strip()
         image_id = image_uri.partition('projects/')[2]
-        image_id = 'projects/' + image_id
+        image_id = f'projects/{image_id}'
         return image_id
 
     @classmethod

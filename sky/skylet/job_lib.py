@@ -339,9 +339,7 @@ def get_status_no_lock(job_id: int) -> Optional[JobStatus]:
     rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
                            (job_id,))
     for (status,) in rows:
-        if status is None:
-            return None
-        return JobStatus(status)
+        return None if status is None else JobStatus(status)
     return None
 
 
@@ -413,8 +411,7 @@ def get_ray_port():
     port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 6379
-    port = json.load(open(port_path))['ray_port']
-    return port
+    return json.load(open(port_path))['ray_port']
 
 
 def get_job_submission_port():
@@ -426,8 +423,7 @@ def get_job_submission_port():
     port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 8265
-    port = json.load(open(port_path))['ray_dashboard_port']
-    return port
+    return json.load(open(port_path))['ray_dashboard_port']
 
 
 def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
@@ -474,8 +470,7 @@ def _get_jobs(
             (*status_str_list, username),
         )
 
-    records = _get_records_from_rows(rows)
-    return records
+    return _get_records_from_rows(rows)
 
 
 def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
@@ -486,8 +481,7 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
         ORDER BY job_id DESC""",
         (*job_ids,),
     )
-    records = _get_records_from_rows(rows)
-    return records
+    return _get_records_from_rows(rows)
 
 
 def _get_pending_jobs():
@@ -516,7 +510,7 @@ def update_job_status(job_owner: str,
 
     This function should only be run on the remote instance with ray==2.4.0.
     """
-    if len(job_ids) == 0:
+    if not job_ids:
         return []
 
     # TODO: if too slow, directly query against redis.
@@ -529,11 +523,12 @@ def update_job_status(job_owner: str,
     job_detail_lists: List['ray_pydantic.JobDetails'] = job_client.list_jobs()
 
     pending_jobs = _get_pending_jobs()
-    job_details = {}
     ray_job_ids_set = set(ray_job_ids)
-    for job_detail in job_detail_lists:
-        if job_detail.submission_id in ray_job_ids_set:
-            job_details[job_detail.submission_id] = job_detail
+    job_details = {
+        job_detail.submission_id: job_detail
+        for job_detail in job_detail_lists
+        if job_detail.submission_id in ray_job_ids_set
+    }
     job_statuses: List[Optional[JobStatus]] = [None] * len(ray_job_ids)
     for i, ray_job_id in enumerate(ray_job_ids):
         job_id = job_ids[i]
@@ -570,8 +565,7 @@ def update_job_status(job_owner: str,
             assert original_status is not None, (job_id, status)
             if status is None:
                 status = original_status
-                if (original_status is not None and
-                        not original_status.is_terminal()):
+                if status is not None and not status.is_terminal():
                     # The job may be stale, when the instance is restarted
                     # (the ray redis is volatile). We need to reset the
                     # status of the task to FAILED if its original status
@@ -750,10 +744,7 @@ def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
             SELECT * FROM jobs
             WHERE job_id=(?)""", (job_id,))
     row = _CURSOR.fetchone()
-    if row is None:
-        return None
-    run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
-    return run_timestamp
+    return None if row is None else row[JobInfoLoc.RUN_TIMESTAMP.value]
 
 
 def run_timestamp_with_globbing_payload(job_ids: List[Optional[str]]) -> str:

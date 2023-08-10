@@ -643,7 +643,7 @@ def spot_launch(
         _maybe_translate_local_file_mounts_and_sync_up(task_)
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-dag-{dag.name}-',
-                                     mode='w') as f:
+                                         mode='w') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         controller_name = spot.SPOT_CONTROLLER_NAME
         vars_to_fill = {
@@ -715,11 +715,10 @@ def spot_launch(
 
             with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
                 common_utils.dump_yaml(tmpfile.name, config_dict)
-                vars_to_fill.update({
+                vars_to_fill |= {
                     'user_config_path': tmpfile.name,
-                    'env_var_skypilot_config':
-                        skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
-                })
+                    'env_var_skypilot_config': skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                }
 
             # Override the controller resources with the ones specified in the
             # config.
@@ -916,7 +915,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
         store_prefix = storage_lib.get_store_prefix(store_type)
         bucket_url = store_prefix + file_bucket_name
         file_id = src_to_file_id[src]
-        new_file_mounts[dst] = bucket_url + f'/file-{file_id}'
+        new_file_mounts[dst] = f'{bucket_url}/file-{file_id}'
     task.update_file_mounts(new_file_mounts)
 
     # Step 6: Replace the source field that is local path in all storage_mounts

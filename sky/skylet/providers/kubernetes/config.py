@@ -151,7 +151,7 @@ def _get_resource(container_resources, resource_name, field_name):
     # Look for keys containing the resource_name. For example,
     # the key 'nvidia.com/gpu' contains the key 'gpu'.
     matching_keys = [key for key in resources if resource_name in key.lower()]
-    if len(matching_keys) == 0:
+    if not matching_keys:
         return float('inf')
     if len(matching_keys) > 1:
         # Should have only one match -- mostly relevant for gpu.
@@ -255,7 +255,8 @@ def _configure_autoscaler_role_binding(namespace, provider_config):
         elif subject['namespace'] != namespace:
             subject_name = subject['name']
             raise InvalidNamespaceError(
-                binding_field + f' subject {subject_name}', namespace)
+                f'{binding_field} subject {subject_name}', namespace
+            )
 
     name = binding['metadata']['name']
     field_selector = f'metadata.name={name}'

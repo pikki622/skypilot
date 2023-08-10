@@ -67,7 +67,6 @@ class LineProcessor(object):
 
     def __exit__(self, except_type, except_value, traceback):
         del except_type, except_value, traceback  # unused
-        pass
 
 
 class RayUpLineProcessor(LineProcessor):

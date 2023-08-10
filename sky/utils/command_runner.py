@@ -75,13 +75,13 @@ def ssh_options_list(ssh_private_key: Optional[str],
         'ForwardAgent': 'yes',
     }
     if ssh_control_name is not None:
-        arg_dict.update({
+        arg_dict |= {
             # Control path: important optimization as we do multiple ssh in one
             # sky.launch().
             'ControlMaster': 'auto',
             'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%C',
             'ControlPersist': '300s',
-        })
+        }
     ssh_key_option = [
         '-i',
         ssh_private_key,
@@ -89,11 +89,7 @@ def ssh_options_list(ssh_private_key: Optional[str],
 
     if ssh_proxy_command is not None:
         logger.debug(f'--- Proxy: {ssh_proxy_command} ---')
-        arg_dict.update({
-            # Due to how log_lib.run_with_log() works (using shell=True) we
-            # must quote this value.
-            'ProxyCommand': shlex.quote(ssh_proxy_command),
-        })
+        arg_dict['ProxyCommand'] = shlex.quote(ssh_proxy_command)
     return ssh_key_option + [
         x for y in (['-o', f'{k}={v}']
                     for k, v in arg_dict.items()
@@ -174,13 +170,7 @@ class SSHCommandRunner:
     def _ssh_base_command(self, *, ssh_mode: SshMode,
                           port_forward: Optional[List[int]]) -> List[str]:
         ssh = ['ssh']
-        if ssh_mode == SshMode.NON_INTERACTIVE:
-            # Disable pseudo-terminal allocation. Otherwise, the output of
-            # ssh will be corrupted by the user's input.
-            ssh += ['-T']
-        else:
-            # Force pseudo-terminal allocation for interactive/login mode.
-            ssh += ['-tt']
+        ssh += ['-T'] if ssh_mode == SshMode.NON_INTERACTIVE else ['-tt']
         if port_forward is not None:
             for port in port_forward:
                 local = remote = port
@@ -326,10 +316,7 @@ class SSHCommandRunner:
         # shooting a lot of messages to the output. --info=progress2 is used
         # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
         # OS has a default rsync==2.6.9 (16 years old).
-        rsync_command = ['rsync', RSYNC_DISPLAY_OPTION]
-
-        # --filter
-        rsync_command.append(RSYNC_FILTER_OPTION)
+        rsync_command = ['rsync', RSYNC_DISPLAY_OPTION, RSYNC_FILTER_OPTION]
 
         if up:
             # The source is a local path, so we need to resolve it.

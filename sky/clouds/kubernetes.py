@@ -77,21 +77,19 @@ class KubernetesInstanceType:
         pattern = re.compile(
             r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_count>\d+)(?P<accelerator_type>\S+))?$'  # pylint: disable=line-too-long
         )
-        match = pattern.match(name)
-        if match:
-            cpus = float(match.group('cpus'))
-            memory = float(match.group('memory'))
-            accelerator_count = match.group('accelerator_count')
-            accelerator_type = match.group('accelerator_type')
-            if accelerator_count:
-                accelerator_count = float(accelerator_count)
-                accelerator_type = str(accelerator_type)
-            else:
-                accelerator_count = None
-                accelerator_type = None
-            return cpus, memory, accelerator_count, accelerator_type
-        else:
+        if not (match := pattern.match(name)):
             raise ValueError(f'Invalid instance name: {name}')
+        cpus = float(match['cpus'])
+        memory = float(match['memory'])
+        accelerator_count = match['accelerator_count']
+        accelerator_type = match['accelerator_type']
+        if accelerator_count:
+            accelerator_count = float(accelerator_count)
+            accelerator_type = str(accelerator_type)
+        else:
+            accelerator_count = None
+            accelerator_type = None
+        return cpus, memory, accelerator_count, accelerator_type
 
     @classmethod
     def from_instance_type(cls, name: str) -> 'KubernetesInstanceType':
@@ -112,8 +110,8 @@ class KubernetesInstanceType:
                        accelerator_count: float = 0,
                        accelerator_type: str = '') -> 'KubernetesInstanceType':
         """Returns an instance name object from the given resources."""
-        name = f'{cpus}CPU--{memory}GB'
         if accelerator_count > 0:
+            name = f'{cpus}CPU--{memory}GB'
             name += f'--{accelerator_count}{accelerator_type}'
         return cls(cpus=cpus,
                    memory=memory,
@@ -236,10 +234,8 @@ class Kubernetes(clouds.Cloud):
         instance_mem = int(
             memory.strip('+')
         ) if memory is not None else \
-            instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
-        virtual_instance_type = KubernetesInstanceType(instance_cpus,
-                                                       instance_mem).name
-        return virtual_instance_type
+                instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
+        return KubernetesInstanceType(instance_cpus, instance_mem).name
 
     @classmethod
     def get_accelerators_from_instance_type(

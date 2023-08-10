@@ -73,7 +73,7 @@ class OCINodeProvider(NodeProvider):
                     k for k, v in tag_filters.items()
                     if k not in tags or v != tags[k]
                 ]
-                if len(unmatched_tags) == 0:
+                if not unmatched_tags:
                     return_nodes[k] = node
                     cache_hit |= True
 
@@ -126,18 +126,17 @@ class OCINodeProvider(NodeProvider):
     def is_running(self, node_id):
         """Return whether the specified node is running."""
         node = self._get_cached_node(node_id=node_id)
-        check_result = node is None or node["status"] == "RUNNING"
-
-        return check_result
+        return node is None or node["status"] == "RUNNING"
 
     @utils.debug_enabled(logger=logger)
     def is_terminated(self, node_id):
         """Return whether the specified node is terminated."""
         node = self._get_cached_node(node_id=node_id)
-        check_result = ((node is None) or (node["status"] == "TERMINATED") or
-                        (node["status"] == "TERMINATING"))
-
-        return check_result
+        return (
+            (node is None)
+            or (node["status"] == "TERMINATED")
+            or (node["status"] == "TERMINATING")
+        )
 
     @utils.debug_enabled(logger=logger)
     def node_tags(self, node_id):
@@ -413,7 +412,7 @@ class OCINodeProvider(NodeProvider):
                 logger.info(f"Tags are well set for node {node_id}")
                 break
             except Exception as e:
-                retry_count = retry_count + 1
+                retry_count += 1
                 wait_seconds = oci_conf.RETRY_INTERVAL_BASE_SECONDS * retry_count
                 logger.warn(
                     f"Not ready yet, wait {wait_seconds} seconds & retry!")
@@ -430,9 +429,9 @@ class OCINodeProvider(NodeProvider):
             return  # Node not exists yet.
 
         logger.debug(f"sky_spot_flag: {node['tags']['sky_spot_flag']}")
-        preemptibleFlag = (True if node and
-                           (str(node["tags"]["sky_spot_flag"]) == "true") else
-                           False)
+        preemptibleFlag = bool(
+            node and (str(node["tags"]["sky_spot_flag"]) == "true")
+        )
 
         if self.cache_stopped_nodes and not preemptibleFlag:
             logger.info(f"Stopping instance {node_id}"

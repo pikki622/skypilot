@@ -469,13 +469,11 @@ class RayCodeGen:
         # Build remote_task.options(...)
         #   resources=...
         #   num_gpus=...
-        options = []
-        options.append(f'num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND}')
-
+        options = [f'num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND}']
         num_gpus = 0.0
         if ray_resources_dict is not None:
             assert len(ray_resources_dict) == 1, \
-                ('There can only be one type of accelerator per instance.'
+                    ('There can only be one type of accelerator per instance.'
                  f' Found: {ray_resources_dict}.')
             num_gpus = list(ray_resources_dict.values())[0]
             options.append(f'resources={json.dumps(ray_resources_dict)}')
@@ -1176,13 +1174,7 @@ class RetryingVmProvisioner(object):
         head_node_launch_may_have_been_requested = any(
             'Acquiring an up-to-date head node' in line
             for line in stdout_splits + stderr_splits)
-        # If head node request has definitely not been sent (this happens when
-        # there are errors during node provider "bootstrapping", e.g.,
-        # VPC-not-found errors), then definitely no nodes are launched.
-        definitely_no_nodes_launched = (
-            not head_node_launch_may_have_been_requested)
-
-        return definitely_no_nodes_launched
+        return not head_node_launch_may_have_been_requested
 
     def _yield_zones(
         self, to_provision: resources_lib.Resources, num_nodes: int,
@@ -1443,10 +1435,7 @@ class RetryingVmProvisioner(object):
         if not need_provision:
             # if quota is found to be zero, raise exception and skip to
             # the next region
-            if to_provision.use_spot:
-                instance_descriptor = 'spot'
-            else:
-                instance_descriptor = 'on-demand'
+            instance_descriptor = 'spot' if to_provision.use_spot else 'on-demand'
             raise exceptions.ResourcesUnavailableError(
                 f'{colorama.Fore.YELLOW}Found no quota for '
                 f'{to_provision.instance_type} {instance_descriptor} '
@@ -2010,7 +1999,7 @@ class RetryingVmProvisioner(object):
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
 
-        failover_history: List[Exception] = list()
+        failover_history: List[Exception] = []
 
         style = colorama.Style
         # Retrying launchable resources.
@@ -2019,10 +2008,7 @@ class RetryingVmProvisioner(object):
                 # Recheck cluster name as the 'except:' block below may
                 # change the cloud assignment.
                 to_provision.cloud.check_cluster_name_is_valid(cluster_name)
-                if dryrun:
-                    cloud_user = None
-                else:
-                    cloud_user = to_provision.cloud.get_current_user_identity()
+                cloud_user = None if dryrun else to_provision.cloud.get_current_user_identity()
                 # Skip if to_provision.cloud does not support requested features
                 to_provision.cloud.check_features_are_supported(
                     self._requested_features)
@@ -2323,14 +2309,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             use_cached_ports: bool = True) -> Optional[List[int]]:
         if not use_cached_ports:
             self._update_stable_ssh_ports(max_attempts=max_attempts)
-        if self.stable_ssh_ports is not None:
-            return self.stable_ssh_ports
-        return None
+        return self.stable_ssh_ports if self.stable_ssh_ports is not None else None
 
     def get_hourly_price(self) -> float:
-        hourly_cost = (self.launched_resources.get_cost(3600) *
-                       self.launched_nodes)
-        return hourly_cost
+        return self.launched_resources.get_cost(3600) * self.launched_nodes
 
     @property
     def cluster_yaml(self):
@@ -2339,26 +2321,22 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     @property
     def head_ip(self):
         external_ips = self.external_ips()
-        if external_ips is not None:
-            return external_ips[0]
-        return None
+        return external_ips[0] if external_ips is not None else None
 
     @property
     def head_ssh_port(self):
-        external_ssh_ports = self.external_ssh_ports()
-        if external_ssh_ports:
+        if external_ssh_ports := self.external_ssh_ports():
             return external_ssh_ports[0]
         return None
 
     @property
     def num_node_ips(self) -> int:
         """Returns number of IPs of the cluster, correctly handling TPU Pod."""
-        is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(self.launched_resources)
-        if is_tpu_vm_pod:
-            num_ips = tpu_utils.get_num_tpu_devices(self.launched_resources)
-        else:
-            num_ips = self.launched_nodes
-        return num_ips
+        return (
+            tpu_utils.get_num_tpu_devices(self.launched_resources)
+            if (is_tpu_vm_pod := tpu_utils.is_tpu_vm_pod(self.launched_resources))
+            else self.launched_nodes
+        )
 
     def __setstate__(self, state):
         self._version = self._VERSION
@@ -2435,7 +2413,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._optimize_target) or optimizer.OptimizeTarget.COST
         self._requested_features = kwargs.pop('requested_features',
                                               self._requested_features)
-        assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
+        assert not kwargs, f'Unexpected kwargs: {kwargs}'
 
     def check_resources_fit_cluster(self, handle: CloudVmRayResourceHandle,
                                     task: task_lib.Task):
@@ -2998,7 +2976,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                           f'touch {remote_log_path}')
             code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
-            job_submit_cmd = mkdir_code + ' && ' + code
+            job_submit_cmd = f'{mkdir_code} && {code}'
 
             if spot_dag is not None:
                 # Add the spot job to spot queue table.
@@ -3015,7 +2993,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # We cannot set the spot job to PENDING state in the codegen for
                 # the controller process job, as it will stay in the job pending
                 # table and not be executed until there is an empty slot.
-                job_submit_cmd = job_submit_cmd + ' && ' + spot_code
+                job_submit_cmd = f'{job_submit_cmd} && {spot_code}'
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
@@ -3113,13 +3091,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         switch_user_cmd = job_lib.make_job_command_with_user_switching(
             ssh_user, remote_run_file)
         switch_user_cmd = ' '.join(switch_user_cmd)
-        job_submit_cmd = (
-            'ray job submit '
-            '--address='
-            f'http://127.0.0.1:{constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
-            f'--submission-id {ray_job_id} '
-            f'--no-wait -- {switch_user_cmd}')
-        return job_submit_cmd
+        return f'ray job submit --address=http://127.0.0.1:{constants.SKY_REMOTE_RAY_DASHBOARD_PORT} --submission-id {ray_job_id} --no-wait -- {switch_user_cmd}'
 
     def _add_job(self, handle: CloudVmRayResourceHandle,
                  job_name: Optional[str], resources_str: str) -> int:
